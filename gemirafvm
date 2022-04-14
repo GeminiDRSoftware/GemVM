@@ -1,0 +1,37 @@
+#!/usr/bin/python3
+#
+# Copyright(c) 2022 Association of Universities for Research in Astronomy, Inc.
+
+import shlex
+import subprocess
+
+log_file = 'gemirafvm.log'
+
+qemu_cmd = 'qemu-system-x86_64'
+#qemu_cmd = '/usr/libexec/qemu-kvm'
+
+args = (
+    '-m 3G',
+    '-hda qemuiraf.qcow2',
+    '-name "IRAF VM"',
+    '-machine q35',
+    '-smp 2',
+    '-vga none',
+    '-nographic',
+    '-qmp unix:/tmp/.gemiraf_qmp,server,nowait',
+    '-device e1000,netdev=net0',
+    '-netdev user,id=net0,hostfwd=tcp::2222-:22',
+)
+args = shlex.split(' '.join(args))  # split opts & their args for Popen
+
+with open(log_file, 'w+', encoding='utf-8', errors='surrogateescape') as log:
+
+    p = subprocess.Popen((qemu_cmd, *args), stdin=subprocess.PIPE,
+                         stdout=log, stderr=subprocess.STDOUT,
+                         encoding='utf-8', errors='surrogateescape')
+
+if p.wait():
+    print('Oh dear', p.returncode)
+else:
+    print('Good', p.returncode)
+
