@@ -69,7 +69,6 @@ class VMState:
                f'exit_status {self.exit_status}')
 
     def _keyboard_interrupt(self, events):
-        self.status = 'shutting_down'
         events['shutdown_request'].set()
 
     async def _run_vm(self, events):
@@ -165,8 +164,7 @@ class VMState:
             return
         if self.state == 'booting':
             sys.stderr.write('\nTimed out.\n')
-            self.state = 'off'  # does this really belong here?
-            self._cancel_tasks()
+            self._cancel_tasks()  # May leave QEMU running in the background
 
     async def _shut_down(self, events):
 
@@ -203,7 +201,7 @@ class VMState:
             while self.state != 'off':
                 reply = json.loads(await reader.readline())
                 if 'event' in reply and reply['event'] == 'SHUTDOWN':
-                    # The VM has shut down, but self.status gets set to 'off'
+                    # The VM has shut down, but self.state gets set to 'off'
                     # by _run_vm, when the process exits a couple of sec later.
                     # Log this confirmation (& POWERDOWN) in a later version.
                     break
