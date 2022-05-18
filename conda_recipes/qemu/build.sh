@@ -32,7 +32,6 @@ LIBTOOL=${BUILD_PREFIX}/bin/libtool
 	    --enable-virtfs \
 	    --enable-vnc \
 	    --disable-xen \
-	    --extra-cflags=-DNCURSES_WIDECHAR=1 \
 	    --smbd=${PREFIX}/bin/smbd || exit 1  # avoid OS SMB, from homebrew
 
 make || exit $?

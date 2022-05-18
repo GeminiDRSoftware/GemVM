@@ -21,29 +21,21 @@ requirements:
   host:
     - gettext
     - glib
-  # - gnutls
     - jpeg
     - libffi
     - libpng
     - libslirp
-  # - libssh2
     - lzo
-    - ncurses
-  # - nettle
     - pixman
     - snappy    
   run:
     - gettext
     - glib
-  # - gnutls
     - jpeg
     - libffi
     - libpng
     - libslirp
-  # - libssh2
     - lzo
-    - ncurses
-  # - nettle
     - pixman
     - snappy
 
