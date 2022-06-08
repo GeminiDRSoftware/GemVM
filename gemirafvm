@@ -20,7 +20,6 @@ mem_GB = 3
 qmp_sock_name = '/tmp/.gemiraf_qmp'  # this is just inherently Unix-specific
 
 qemu_cmd = 'qemu-system-x86_64'
-#qemu_cmd = '/usr/libexec/qemu-kvm'
 
 args = (
     '-m {}G'.format(mem_GB),
