@@ -72,7 +72,16 @@ class VMState:
 
     async def _run_vm(self, events):
 
-        with open(log_file, 'wb+') as log:
+        # Instead of overwriting the log file, delete & (re)create it in
+        # append mode, which should guarantee (per POSIX) that QEMU won't
+        # overwrite any text that gets appended elsewhere in this script, if
+        # the subprocess is still running at exit due to a time-out.
+        try:
+            os.remove(log_file)
+        except OSError:
+            pass
+
+        with open(log_file, 'a+b') as log:
 
             try:
                 # Run VM in background session so it doesn't die on ctrl-c,
