@@ -47,6 +47,7 @@ class VMState:
         self.pid = None
         self.exit_status = None
         self.mem_err = False
+        self.debug = False
 
     @property
     def state(self):
@@ -121,30 +122,44 @@ class VMState:
 
     async def _wait_until_booted(self, events):
 
-        writer = None
         while self.state == 'booting':
+            if self.debug:
+                print('Attempt ssh connection')
             try:
-                reader, writer = await asyncio.open_connection(
-                    host=socket.gethostbyname('localhost'), port=ssh_port
-                )
-            except ConnectionRefusedError:
+                await self._check_ssh()
+            except ConnectionError:
                 await asyncio.sleep(1)  # retry port after 1s
             else:
+                self.state = 'running'
+                self._cancel_tasks('_boot_timeout')  # unblock event loop exit
                 break
-        if writer is None:  # state changed asynchronously without cancelling
-            raise ConnectionError(f'Failed to open localhost:{ssh_port}')
 
+        # This coroutine should get cancelled before this ever happens. Don't
+        # raise an exception, which would block any coroutines waiting on this.
+        if self.state != 'running':
+            sys.stderr.write(f'State changed before successful connection '
+                             f'to localhost:{ssh_port}\n')
+
+    async def _check_ssh(self):
+
+        # This usually gives ConnectionRefusedError just on the first try:
+        reader, writer = await asyncio.open_connection(
+            host=socket.gethostbyname('localhost'), port=ssh_port
+        )
+        # This occasionally gets EOF instead of the expected reply (presumably
+        # because of some time-out or the server not being ready yet, as when
+        # the ssh client briefly produces "read: Connection reset by peer"):
         try:
             reply = await reader.readline()
         finally:
             writer.close()
-        if reply.startswith(b'SSH-2.0-'):
-            self.state = 'running'
-            self._cancel_tasks('_boot_timeout')  # stop blocking event loop exit
-        else:
+
+        if self.debug:
+            print(f'Reply {reply} from guest ssh service')
+
+        if not reply.startswith(b'SSH-2.0-'):
             raise ConnectionError(
-                f'Bad reply "{reply}" from guest ssh service; '
-                 'this should not happen'
+                f'Bad reply "{reply}" from guest ssh service.'
             )
 
     async def _progress(self, events):
