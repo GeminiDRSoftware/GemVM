@@ -32,7 +32,7 @@ args = (
     '-boot menu=off',
     '-qmp unix:{},server,nowait'.format(qmp_sock_name),
     '-device e1000,netdev=net0',
-    '-netdev user,id=net0,hostfwd=tcp::{}-:22'.format(ssh_port),
+    '-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{}-:22'.format(ssh_port),
 )
 args = shlex.split(' '.join(args))  # split opts & their args for Popen
 
