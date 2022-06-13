@@ -36,7 +36,7 @@ args = (
 )
 args = shlex.split(' '.join(args))  # split opts & their args for Popen
 
-class VMState:
+class VMControl:
 
     states = ('off', 'booting', 'running', 'shutting_down')
 
@@ -301,7 +301,7 @@ class VMState:
 
 t = time.time()
 
-vm = VMState()
+vm = VMControl()
 
 exit_status = vm()
 
