@@ -121,7 +121,7 @@ class VMControl:
                 self.pid = proc.pid
 
                 if self.debug:
-                    print(f'\nPID {self.pid}')
+                    print(f'\nSubprocess Id {self.pid}')
 
                 # Yield control while waiting for process to complete, then
                 # save its exit code when it does:
@@ -228,6 +228,9 @@ class VMControl:
         reader, writer = await asyncio.open_unix_connection(self.qmp_sock)
 
         try:
+            if self.debug:
+                print(f'\nOpened socket {self.qmp_sock}')
+
             # Negotiate capabilities and enter "command mode", as per the QMP
             # documentation. We might get a JSONDecodeError if the reply is
             # malformed, but I haven't seen that happen.
@@ -236,6 +239,8 @@ class VMControl:
             reply = json.loads(await reader.readline())
             if 'return' in reply and reply['return'] == {}: # standard response
                 self._qmp_established = True
+                if self.debug:
+                    print('\nEstablished QMP connection')
             else:
                 # Should we re-try here? Don't guess at failure modes not seen.
                 raise ConnectionError(
@@ -246,6 +251,8 @@ class VMControl:
             await events['shutdown_request'].wait()
             writer.write(b'{"execute": "system_powerdown"}\r\n')
             self.state = 'shutting_down'  # wait for {'event' : 'POWERDOWN'} ?
+            if self.debug:
+                print('\nSent system_powerdown command')
             while self.state != 'off':
                 reply = json.loads(await reader.readline())
                 if 'event' in reply and reply['event'] == 'SHUTDOWN':
