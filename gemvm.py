@@ -79,6 +79,8 @@ class VMControl:
             f'-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{self.port}-:22',
         )
 
+    # Only one instance can be called from a given Python process without a QMP
+    # socket conflict. This call blocks execution anyway but isn't thread safe.
     def __call__(self):
         asyncio.run(self._run())
         return self.exit_status
