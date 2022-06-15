@@ -324,53 +324,55 @@ class VMControl:
             self._tasks[name].cancel()
 
 
-t = time.time()
+if __name__ == '__main__':
 
-vm = VMControl('qemuiraf.qcow2', mem=mem_GB, port=ssh_port, debug=debug)
+    t = time.time()
 
-exit_status = vm()
+    vm = VMControl('qemuiraf.qcow2', mem=mem_GB, port=ssh_port, debug=debug)
 
-if debug:
-    print(f'\nAfter execution: {vm}')
+    exit_status = vm()
 
-if exit_status == 0:
-    print('\nVM process completed successfully\n')
-else:
-    end = f'see {vm.log_file}\n\n'
-    if exit_status is None:
-        if vm.pid is None:
-            err = f'\nFailed to start VM process: {end}'
-        else:
-            try:
-                os.kill(vm.pid, 0)  # no-op checks whether it's still running
-            except ProcessLookupError:
-                # This will probably never happen, because the process should
-                # remain as a zombie until the parent gets its exit status:
-                err = f'\nVM process died uncleanly: {end}'
-            else:
-                err = (f'\nApparently failed to shut down VM process: {end}'
-                       f'Try logging in with ssh and issuing "sudo shutdown '
-                       f'now" manually; otherwise\nkill process {vm.pid} if '
-                       f'it\'s unresponsive.\n\n')
+    if debug:
+        print(f'\nAfter execution: {vm}')
+
+    if exit_status == 0:
+        print('\nVM process completed successfully\n')
     else:
-        if exit_status < 0:
-            err = f'\nVM process killed with signal {-exit_status}: {end}'
+        end = f'see {vm.log_file}\n\n'
+        if exit_status is None:
+            if vm.pid is None:
+                err = f'\nFailed to start VM process: {end}'
+            else:
+                try:
+                    os.kill(vm.pid, 0)  # no-op checks if it's still running
+                except ProcessLookupError:
+                    # This will probably never happen, because process should
+                    # remain as a zombie until the parent gets its exit status:
+                    err = f'\nVM process died uncleanly: {end}'
+                else:
+                    err = (f'\nApparently failed to shut down VM process: {end}'
+                           f'Try logging in with ssh and issuing "sudo '
+                           f'shutdown now" manually; otherwise\nkill process '
+                           f'{vm.pid} if it\'s unresponsive.\n\n')
         else:
-            err = (f'\nVM process completed with error status {exit_status}: '
-                   f'{end}')
-    sys.stderr.write(err)
+            if exit_status < 0:
+                err = f'\nVM process killed with signal {-exit_status}: {end}'
+            else:
+                err = (f'\nVM process completed with error status '
+                       f'{exit_status}: {end}')
+        sys.stderr.write(err)
 
-    if vm.mem_err:
-        sys.stderr.write(f'It looks like QEMU failed to allocate {mem_GB}GB '
-                         f'of contiguous memory to run the VM.\n\n'
-                         f'Try restarting large programs such as your Web '
-                         f'browser, to reduce memory\nfragmentation (or '
-                         f'closing them entirely if that doesn\'t solve it). '
-                         f'If the\nproblem persists, try reducing "mem_GB" in '
-                         f'the configuration, but note that\nthe VM is '
-                         f'unlikely to work well with less than about 1GB '
-                         f'(untested).\n\n')
+        if vm.mem_err:
+            sys.stderr.write(f'It looks like QEMU failed to allocate {mem_GB}'
+                             f'GB of contiguous memory to run the VM.\n\n'
+                             f'Try restarting large programs such as your Web '
+                             f'browser, to reduce memory\nfragmentation (or '
+                             f'closing them entirely if that doesn\'t solve '
+                             f'it). If the\nproblem persists, try reducing '
+                             f'"mem_GB" in the configuration, but note that\n'
+                             f'the VM is unlikely to work well with much less '
+                             f'than 1GB (untested).\n\n')
 
-print('T', time.time() - t)
+    print('T', time.time() - t)
 
-sys.exit(1 if exit_status is None else exit_status)
+    sys.exit(1 if exit_status is None else exit_status)
