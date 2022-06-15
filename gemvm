@@ -14,40 +14,36 @@ import sys
 import time
 import traceback
 
-log_file = 'gemirafvm.log'
 ssh_port = 2222
 mem_GB = 3
-qmp_sock_name = '/tmp/.gemiraf_qmp'  # this is just inherently Unix-specific
 
-qemu_cmd = 'qemu-system-x86_64'
+debug = False
 
-args = (
-    '-m {}G'.format(mem_GB),
-    '-hda qemuiraf.qcow2',
-    '-name "IRAF VM"',
-    '-machine q35',
-    '-smp 2',
-    '-vga none',
-    '-nographic',
-    '-boot menu=off',
-    '-qmp unix:{},server,nowait'.format(qmp_sock_name),
-    '-device e1000,netdev=net0',
-    '-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{}-:22'.format(ssh_port),
-)
-args = shlex.split(' '.join(args))  # split opts & their args for Popen
 
 class VMControl:
 
     states = ('off', 'booting', 'running', 'shutting_down')
 
-    def __init__(self):
+    def __init__(self, disk_image, cmd='qemu-system-x86_64', mem=3, port=2222,
+                 debug=False):
+
+        self.disk_image = disk_image
+        self.cmd = cmd
+        self.mem = mem
+        self.port = port
+        self.debug = debug
+
+        self.title, _ = os.path.splitext(os.path.basename(self.disk_image))
+        self.log_file = f'gemvm_{self.title}.log'
+        self.qmp_sock = os.path.join(os.sep, 'tmp', '.gemvm_qmp')
+
         self._state = 'off'
         self._qmp_established = False
         self._tasks = {}
+
         self.pid = None
         self.exit_status = None
         self.mem_err = False
-        self.debug = False
 
     @property
     def state(self):
@@ -60,13 +56,38 @@ class VMControl:
         else:
             raise ValueError(f'Invalid VM state: {state}')
 
+    @property
+    def qmp_established(self):
+        return self._qmp_established
+
+    @property
+    def cmd_args(self):
+
+        return (
+            f'-m {self.mem}G',
+            f'-hda {self.disk_image}',
+            # f'-drive file={self.disk_image},if=virtio,cache=off',
+            f'-name "{self.title}"',
+            f'-machine q35',
+            f'-smp 2',
+            f'-vga none',
+            f'-nographic',
+            f'-boot menu=off',
+            f'-qmp unix:{self.qmp_sock},server,nowait',
+            f'-device e1000,netdev=net0',
+            # f'-device virtio-net-pci,netdev=net0',
+            f'-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{self.port}-:22',
+        )
+
     def __call__(self):
         asyncio.run(self._run())
         return self.exit_status
 
-    def __str__(self):
-        return(f'{self.__class__.__name__}: state {self.state}, '
-               f'exit_status {self.exit_status}')
+    def __repr__(self):
+        return(f"<{self.__class__.__name__}('{self.disk_image}', "
+               f"mem={self.mem}, port={self.port}, pid={self.pid}, "
+               f"state='{self.state}', qmp_established={self.qmp_established}, "
+               f"exit_status={self.exit_status})>")
 
     def _keyboard_interrupt(self, events):
         events['shutdown_request'].set()
@@ -78,23 +99,27 @@ class VMControl:
         # overwrite any text that gets appended elsewhere in this script, if
         # the subprocess is still running at exit due to a time-out.
         try:
-            os.remove(log_file)
+            os.remove(self.log_file)
         except OSError:
             pass
 
-        with open(log_file, 'a+b') as log:
+        with open(self.log_file, 'a+b') as log:
 
             try:
                 # Run VM in background session so it doesn't die on ctrl-c,
                 # capturing all output to the log:
                 proc = await asyncio.create_subprocess_exec(
-                       qemu_cmd, *args,
+                       self.cmd,
+                       *shlex.split(' '.join(self.cmd_args)), # split opts+args
                        stdin=subprocess.PIPE,
                        stdout=log,
                        stderr=subprocess.STDOUT,
                        start_new_session=True,
                 )
                 self.pid = proc.pid
+
+                if self.debug:
+                    print(f'\nPID {self.pid}')
 
                 # Yield control while waiting for process to complete, then
                 # save its exit code when it does:
@@ -124,7 +149,7 @@ class VMControl:
 
         while self.state == 'booting':
             if self.debug:
-                print('Attempt ssh connection')
+                print('\nAttempt ssh connection')
             try:
                 await self._check_ssh()
             except ConnectionError:
@@ -138,13 +163,13 @@ class VMControl:
         # raise an exception, which would block any coroutines waiting on this.
         if self.state != 'running':
             sys.stderr.write(f'State changed before successful connection '
-                             f'to localhost:{ssh_port}\n')
+                             f'to localhost:{self.port}\n')
 
     async def _check_ssh(self):
 
         # This usually gives ConnectionRefusedError just on the first try:
         reader, writer = await asyncio.open_connection(
-            host=socket.gethostbyname('localhost'), port=ssh_port
+            host=socket.gethostbyname('localhost'), port=self.port
         )
         # This occasionally gets EOF instead of the expected reply (presumably
         # because of some time-out or the server not being ready yet, as when
@@ -155,7 +180,7 @@ class VMControl:
             writer.close()
 
         if self.debug:
-            print(f'Reply {reply} from guest ssh service')
+            print(f'\nReply {reply} from guest ssh service')
 
         if not reply.startswith(b'SSH-2.0-'):
             raise ConnectionError(
@@ -170,7 +195,7 @@ class VMControl:
             print(char, end='', flush=True)
             if not shutdown_req_msg and events['shutdown_request'].is_set():
                 shutdown_req_msg = True
-                print('Shutdown requested')
+                print('\nShutdown requested')
             await asyncio.sleep(1)
         # If anything has gone wrong (eg. QMP), add a warning to the status?
 
@@ -198,7 +223,7 @@ class VMControl:
         # Open the QMP socket for communicating with QEMU.
         # Here we'll get a ConnectionRefusedError if the socket can't be opened
         # (eg. because overwritten) or FileNotFoundError if it doesn't exist.
-        reader, writer = await asyncio.open_unix_connection(qmp_sock_name)
+        reader, writer = await asyncio.open_unix_connection(self.qmp_sock)
 
         try:
             # Negotiate capabilities and enter "command mode", as per the QMP
@@ -212,7 +237,7 @@ class VMControl:
             else:
                 # Should we re-try here? Don't guess at failure modes not seen.
                 raise ConnectionError(
-                    f'Failed to establish QMP connection at {qmp_sock_name}'
+                    f'Failed to establish QMP connection at {self.qmp_sock}'
                 )
 
             # Now we're ready to shut down as soon as the signal arrives:
@@ -285,7 +310,7 @@ class VMControl:
                                                retval.__traceback__)
                 )
         if errors:
-            with open(log_file, 'a+', encoding='utf-8',
+            with open(self.log_file, 'a+', encoding='utf-8',
                       errors='surrogateescape') as log:
                 log.write('-'*78+'\n')
                 log.write('Errors were produced while running the control '
@@ -301,14 +326,17 @@ class VMControl:
 
 t = time.time()
 
-vm = VMControl()
+vm = VMControl('qemuiraf.qcow2', mem=mem_GB, port=ssh_port, debug=debug)
 
 exit_status = vm()
+
+if debug:
+    print(f'\nAfter execution: {vm}')
 
 if exit_status == 0:
     print('\nVM process completed successfully\n')
 else:
-    end = f'see {log_file}\n\n'
+    end = f'see {vm.log_file}\n\n'
     if exit_status is None:
         if vm.pid is None:
             err = f'\nFailed to start VM process: {end}'
