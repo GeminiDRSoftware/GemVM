@@ -35,7 +35,7 @@ class VMControl:
 
         self.title, _ = os.path.splitext(os.path.basename(self.disk_image))
         self.log_file = f'gemvm_{self.title}.log'
-        self.qmp_sock = os.path.join(os.sep, 'tmp', '.gemvm_qmp')
+        self.qmp_sock = os.path.join(os.sep, 'tmp', f'.gemvm_qmp_{os.getpid()}')
 
         self._state = 'off'
         self._qmp_established = False
