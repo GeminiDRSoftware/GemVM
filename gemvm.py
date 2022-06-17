@@ -3,6 +3,7 @@
 # Copyright(c) 2022 Association of Universities for Research in Astronomy, Inc.
 
 import asyncio
+import contextlib
 import functools
 import json
 import os
@@ -17,21 +18,19 @@ import traceback
 ssh_port = 2222
 mem_GB = 3
 
-debug = False
-
 
 class VMControl:
 
     states = ('off', 'booting', 'running', 'shutting_down')
 
     def __init__(self, disk_image, cmd='qemu-system-x86_64', mem=3, port=2222,
-                 debug=False):
+                 flush_log=False):
 
         self.disk_image = disk_image
         self.cmd = cmd
         self.mem = mem
         self.port = port
-        self.debug = debug
+        self.flush_log = flush_log
 
         self.title, _ = os.path.splitext(os.path.basename(self.disk_image))
         self.log_file = f'gemvm_{self.title}.log'
@@ -40,6 +39,7 @@ class VMControl:
         self._state = 'off'
         self._qmp_established = False
         self._tasks = {}
+        self._log_fd = None
 
         self.pid = None
         self.exit_status = None
@@ -79,6 +79,27 @@ class VMControl:
             f'-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{self.port}-:22',
         )
 
+    def log_context(self):
+        if self._log_fd and not self._log_fd.closed:
+            # If the log's already/still open, re-use file handle:
+            return contextlib.nullcontext(self._log_fd)
+        else:
+            # Hold log file open for duration of outermost context manager
+            # (just a single write if that's the context in self.log):
+            self._log_fd = open(self.log_file, 'a+',
+                                encoding='utf-8', errors='surrogateescape')
+            return self._log_fd
+
+    def log(self, msg, time_stamp=True):
+        with self.log_context() as log_fd:
+            if time_stamp:
+                ts = time.strftime("%H:%M:%S", time.localtime())
+                log_fd.write(f'{ts}  {msg}\n')
+            else:
+                log_fd.write(f'{msg}\n')
+            if self.flush_log:
+                log_fd.flush()
+
     # Only one instance can be called from a given Python process without a QMP
     # socket conflict. This call blocks execution anyway but isn't thread safe.
     def __call__(self):
@@ -96,16 +117,9 @@ class VMControl:
 
     async def _run_vm(self, events):
 
-        # Instead of overwriting the log file, delete & (re)create it in
-        # append mode, which should guarantee (per POSIX) that QEMU won't
-        # overwrite any text that gets appended elsewhere in this script, if
-        # the subprocess is still running at exit due to a time-out.
-        try:
-            os.remove(self.log_file)
-        except OSError:
-            pass
-
-        with open(self.log_file, 'a+b') as log:
+        # Open log separately for subprocess, which needs to use binary mode
+        # (the process will get its own copy of the file handle in any case):
+        with open(self.log_file, 'a+b') as log_fd:
 
             try:
                 # Run VM in background session so it doesn't die on ctrl-c,
@@ -114,14 +128,13 @@ class VMControl:
                        self.cmd,
                        *shlex.split(' '.join(self.cmd_args)), # split opts+args
                        stdin=subprocess.PIPE,
-                       stdout=log,
+                       stdout=log_fd,
                        stderr=subprocess.STDOUT,
                        start_new_session=True,
                 )
                 self.pid = proc.pid
 
-                if self.debug:
-                    print(f'\nSubprocess Id {self.pid}')
+                self.log(f'Subprocess Id {self.pid}')
 
                 # Yield control while waiting for process to complete, then
                 # save its exit code when it does:
@@ -132,12 +145,12 @@ class VMControl:
                 # from other errors), so we can advise the user on what to do.
                 # This message appears not to change with the locale setting.
                 if self.exit_status == 1:
-                    log.seek(0, 0)
-                    for line in log:
+                    log_fd.seek(0, 0)
+                    for line in log_fd:
                         if b'cannot set up guest memory' in line:
                             self.mem_err = True
                             break
-                    log.seek(0, 2)  # return to end
+                    log_fd.seek(0, 2)  # return to end
 
             finally:
                 # Cancel any tasks that may still be running if the VM didn't
@@ -150,8 +163,7 @@ class VMControl:
     async def _wait_until_booted(self, events):
 
         while self.state == 'booting':
-            if self.debug:
-                print('\nAttempt ssh connection')
+            self.log('Attempt ssh connection')
             try:
                 await self._check_ssh()
             except ConnectionError:
@@ -181,8 +193,7 @@ class VMControl:
         finally:
             writer.close()
 
-        if self.debug:
-            print(f'\nReply {reply} from guest ssh service')
+        self.log(f'Reply {reply} from guest ssh service')
 
         if not reply.startswith(b'SSH-2.0-'):
             raise ConnectionError(
@@ -197,7 +208,9 @@ class VMControl:
             print(char, end='', flush=True)
             if not shutdown_req_msg and events['shutdown_request'].is_set():
                 shutdown_req_msg = True
-                print('\nShutdown requested')
+                msg = 'Shutdown requested'
+                print('\n' + msg)
+                self.log(msg)
             await asyncio.sleep(1)
         # If anything has gone wrong (eg. QMP), add a warning to the status?
 
@@ -228,8 +241,7 @@ class VMControl:
         reader, writer = await asyncio.open_unix_connection(self.qmp_sock)
 
         try:
-            if self.debug:
-                print(f'\nOpened socket {self.qmp_sock}')
+            self.log(f'Opened socket {self.qmp_sock}')
 
             # Negotiate capabilities and enter "command mode", as per the QMP
             # documentation. We might get a JSONDecodeError if the reply is
@@ -239,8 +251,7 @@ class VMControl:
             reply = json.loads(await reader.readline())
             if 'return' in reply and reply['return'] == {}: # standard response
                 self._qmp_established = True
-                if self.debug:
-                    print('\nEstablished QMP connection')
+                self.log('Established QMP connection')
             else:
                 # Should we re-try here? Don't guess at failure modes not seen.
                 raise ConnectionError(
@@ -251,8 +262,7 @@ class VMControl:
             await events['shutdown_request'].wait()
             writer.write(b'{"execute": "system_powerdown"}\r\n')
             self.state = 'shutting_down'  # wait for {'event' : 'POWERDOWN'} ?
-            if self.debug:
-                print('\nSent system_powerdown command')
+            self.log('Sent system_powerdown command')
             while self.state != 'off':
                 reply = json.loads(await reader.readline())
                 if 'event' in reply and reply['event'] == 'SHUTDOWN':
@@ -281,50 +291,66 @@ class VMControl:
 
     async def _run(self):
 
-        loop = asyncio.get_running_loop()
-        events = {
-            'shutdown_request' : asyncio.Event(),
-        }
-        loop.add_signal_handler(
-            signal.SIGINT,
-            functools.partial(self._keyboard_interrupt, events)
-        )
+        # Instead of overwriting the log file, delete & (re)create it in
+        # append mode, which should guarantee (per POSIX) that QEMU & logging
+        # elsewhere in this script won't overwrite each other:
+        try:
+            os.remove(self.log_file)
+        except OSError:
+            pass
 
-        self.state = 'booting'
+        # Hold log file open during execution of the main routine:
+        with self.log_context() as log_fd:
 
-        self._tasks = {
-            name : asyncio.create_task(getattr(self, name)(events)) for
-              name in (
-                  '_run_vm',
-                  '_wait_until_booted',
-                  '_progress',
-                  '_boot_timeout',
-                  '_shut_down',
-                  '_shutdown_timeout',
-              )
-        }
+            loop = asyncio.get_running_loop()
+            events = {
+                'shutdown_request' : asyncio.Event(),
+            }
+            loop.add_signal_handler(
+                signal.SIGINT,
+                functools.partial(self._keyboard_interrupt, events)
+            )
 
-        # Main event loop (saving any exceptions for later):
-        retvals = await asyncio.gather(*self._tasks.values(),
-                                       return_exceptions=True)
+            self.state = 'booting'
 
-        # Append any internal exceptions to the log:
-        errors = []
-        for retval in retvals:
-            if isinstance(retval, Exception) and not \
-               isinstance(retval, asyncio.CancelledError):
-                errors.append('\n')
-                errors.extend(
-                    traceback.format_exception(type(retval), retval,
-                                               retval.__traceback__)
+            self._tasks = {
+                name : asyncio.create_task(getattr(self, name)(events)) for
+                  name in (
+                      '_run_vm',
+                      '_wait_until_booted',
+                      '_progress',
+                      '_boot_timeout',
+                      '_shut_down',
+                      '_shutdown_timeout',
+                  )
+            }
+
+            self.log('', time_stamp=False)
+            self.log('Starting event loop')
+
+            # Main event loop (saving any exceptions for later):
+            retvals = await asyncio.gather(*self._tasks.values(),
+                                           return_exceptions=True)
+
+            self.log(f'{self}')
+
+            # Append any internal exceptions to the log:
+            errors = []
+            for retval in retvals:
+                if isinstance(retval, Exception) and not \
+                   isinstance(retval, asyncio.CancelledError):
+                    errors.append('\n')
+                    errors.extend(
+                        traceback.format_exception(type(retval), retval,
+                                                   retval.__traceback__)
+                    )
+            if errors:
+                self.log(
+                    '-'*78 + '\n'
+                    'Errors were produced while running the control script:\n' +
+                    ''.join(errors),
+                    time_stamp=False
                 )
-        if errors:
-            with open(self.log_file, 'a+', encoding='utf-8',
-                      errors='surrogateescape') as log:
-                log.write('-'*78+'\n')
-                log.write('Errors were produced while running the control '
-                          'script:\n')
-                log.writelines(errors)
 
     def _cancel_tasks(self, *names):
         if not names:
@@ -335,53 +361,52 @@ class VMControl:
 
 if __name__ == '__main__':
 
-    t = time.time()
-
-    vm = VMControl('qemuiraf.qcow2', mem=mem_GB, port=ssh_port, debug=debug)
+    vm = VMControl('qemuiraf.qcow2', mem=mem_GB, port=ssh_port)
 
     exit_status = vm()
 
-    if debug:
-        print(f'\nAfter execution: {vm}')
-
     if exit_status == 0:
-        print('\nVM process completed successfully\n')
+        msg = '\nVM process completed successfully'
+        print(msg + '\n')
+        vm.log(msg, time_stamp=False)
+
     else:
-        end = f'see {vm.log_file}\n\n'
+        end = f'see {vm.log_file}\n'
         if exit_status is None:
             if vm.pid is None:
-                err = f'\nFailed to start VM process: {end}'
+                msg = f'\nFailed to start VM process: {end}'
             else:
                 try:
                     os.kill(vm.pid, 0)  # no-op checks if it's still running
                 except ProcessLookupError:
                     # This will probably never happen, because process should
                     # remain as a zombie until the parent gets its exit status:
-                    err = f'\nVM process died uncleanly: {end}'
+                    msg = f'\nVM process died uncleanly: {end}'
                 else:
-                    err = (f'\nApparently failed to shut down VM process: {end}'
-                           f'Try logging in with ssh and issuing "sudo '
+                    msg = (f'\nApparently failed to shut down VM process: {end}'
+                           f'\nTry logging in with ssh and issuing "sudo '
                            f'shutdown now" manually; otherwise\nkill process '
-                           f'{vm.pid} if it\'s unresponsive.\n\n')
+                           f'{vm.pid} if it\'s unresponsive.\n')
         else:
             if exit_status < 0:
-                err = f'\nVM process killed with signal {-exit_status}: {end}'
+                msg = f'\nVM process killed with signal {-exit_status}: {end}'
             else:
-                err = (f'\nVM process completed with error status '
+                msg = (f'\nVM process completed with error status '
                        f'{exit_status}: {end}')
-        sys.stderr.write(err)
+
+        sys.stderr.write(msg + '\n')
+        vm.log(msg, time_stamp=False)
 
         if vm.mem_err:
-            sys.stderr.write(f'It looks like QEMU failed to allocate {mem_GB}'
-                             f'GB of contiguous memory to run the VM.\n\n'
-                             f'Try restarting large programs such as your Web '
-                             f'browser, to reduce memory\nfragmentation (or '
-                             f'closing them entirely if that doesn\'t solve '
-                             f'it). If the\nproblem persists, try reducing '
-                             f'"mem_GB" in the configuration, but note that\n'
-                             f'the VM is unlikely to work well with much less '
-                             f'than 1GB (untested).\n\n')
-
-    print('T', time.time() - t)
+            msg = (f'It looks like QEMU failed to allocate {mem_GB}GB of '
+                   f'contiguous memory to run the VM.\n\n'
+                   f'Try restarting large programs such as your Web browser, '
+                   f'to reduce memory\nfragmentation (or closing them '
+                   f'entirely if that doesn\'t solve it). If the\nproblem '
+                   f'persists, try reducing "mem_GB" in the configuration '
+                   f'(without going\nbelow 0.25 to 0.5GB, for acceptable '
+                   f'performance with a minimal installation).\n')
+            sys.stderr.write(msg + '\n')
+            vm.log(msg, time_stamp=False)
 
     sys.exit(1 if exit_status is None else exit_status)
