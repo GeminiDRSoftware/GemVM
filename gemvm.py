@@ -4,6 +4,7 @@
 
 import asyncio
 import contextlib
+import curses
 import functools
 import json
 import os
@@ -40,6 +41,13 @@ class VMControl:
         self._qmp_established = False
         self._tasks = {}
         self._log_fd = None
+        self._shutdown_msg = 'Shutdown requested'
+        self._info = (
+            f'Once booted, log in with:\n'
+            f'  ssh -Y -p {self.port} <username>@localhost\n\n'
+            f'Press Ctrl-C to shut down\n'
+        )
+        self._scrn_attrs = {}
 
         self.pid = None
         self.exit_status = None
@@ -103,7 +111,7 @@ class VMControl:
     # Only one instance can be called from a given Python process without a QMP
     # socket conflict. This call blocks execution anyway but isn't thread safe.
     def __call__(self):
-        asyncio.run(self._run())
+        curses.wrapper(lambda stdscr : asyncio.run(self._run(stdscr)))
         return self.exit_status
 
     def __repr__(self):
@@ -114,6 +122,7 @@ class VMControl:
 
     def _keyboard_interrupt(self, events):
         events['shutdown_request'].set()
+        self.log(self._shutdown_msg)
 
     async def _run_vm(self, events):
 
@@ -200,18 +209,62 @@ class VMControl:
                 f'Bad reply "{reply}" from guest ssh service.'
             )
 
-    async def _progress(self, events):
+    def _initscr(self, stdscr):
 
-        shutdown_req_msg = False
+        curses.use_default_colors()  # keep existing background
+        curses.init_pair(1, curses.COLOR_RED, -1)
+        curses.init_pair(2, curses.COLOR_GREEN, -1)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLUE)
+        curses.curs_set(0)  # don't show cursor
+        self._scrn_attrs = {
+            'default' : curses.color_pair(0),
+            'booting' : curses.color_pair(1) | curses.A_BOLD,
+            'running' : curses.color_pair(2) | curses.A_BOLD,
+            'shutting_down' : curses.color_pair(1) | curses.A_BOLD,
+            'title' : curses.color_pair(3) | curses.A_BOLD,
+            'heartbeat' : curses.color_pair(1) | curses.A_BOLD,
+        }
+        self._show_title(stdscr)
+        stdscr.addstr(4, 0, self._info, self._scrn_attrs['default'])
+
+    def _show_title(self, stdscr):
+        title = f'GemVM: {self.title}'.center(curses.COLS)
+        stdscr.addstr(0, 0, title, self._scrn_attrs['title'])
+
+    async def _progress(self, events, stdscr):
+
+        state = None
         while self.state != 'off':
-            char = self.state[0]
-            print(char, end='', flush=True)
-            if not shutdown_req_msg and events['shutdown_request'].is_set():
-                shutdown_req_msg = True
-                msg = 'Shutdown requested'
-                print('\n' + msg)
-                self.log(msg)
+
+            curses.update_lines_cols()  # detect re-sizing
+            self._show_title(stdscr)
+
+            if self.state != state:
+                state = self.state
+                t_start = time.time()  # just for an indicative count
+                msg = state.capitalize().replace('_', ' ')
+                if state == 'running':
+                    beat_text = '\u2665'
+                    beat_attr = self._scrn_attrs['heartbeat']
+                else:
+                    beat_attr = self._scrn_attrs[state]
+
+            if state == 'running':
+                beat_attr ^= curses.A_INVIS  # toggle heartbeat visibility
+            else:
+                beat_text = f'{int(time.time()-t_start):3d}'
+
+            stdscr.addstr(2, 0, msg.ljust(curses.COLS), self._scrn_attrs[state])
+            stdscr.addstr(2, len(msg)+1, beat_text, beat_attr)
+
+            if events['shutdown_request'].is_set():
+                stdscr.addstr(2, curses.COLS - len(self._shutdown_msg) - 1,
+                              self._shutdown_msg, curses.color_pair(0))
+
+            stdscr.refresh()
+
             await asyncio.sleep(1)
+
         # If anything has gone wrong (eg. QMP), add a warning to the status?
 
     async def _boot_timeout(self, events):
@@ -289,7 +342,10 @@ class VMControl:
         sys.stderr.write('\nShut down timed out.\n')
         self._cancel_tasks()
 
-    async def _run(self):
+    async def _run(self, stdscr):
+
+        # Finish initializing appearance with curses:
+        self._initscr(stdscr)
 
         # Instead of overwriting the log file, delete & (re)create it in
         # append mode, which should guarantee (per POSIX) that QEMU & logging
@@ -318,12 +374,14 @@ class VMControl:
                   name in (
                       '_run_vm',
                       '_wait_until_booted',
-                      '_progress',
                       '_boot_timeout',
                       '_shut_down',
                       '_shutdown_timeout',
                   )
             }
+            self._tasks['_progress'] = asyncio.create_task(
+                self._progress(events, stdscr)  # this one has an extra arg
+            )
 
             self.log('', time_stamp=False)
             self.log('Starting event loop')
