@@ -168,7 +168,7 @@ class VMControl:
                 # unexpected errors, and set the final machine state:
                 self._cancel_tasks('_shut_down', '_wait_until_booted',
                                    '_shutdown_timeout', '_boot_timeout')
-                self.state = 'off'
+            self.state = 'off'
 
     async def _wait_until_booted(self, events):
 
