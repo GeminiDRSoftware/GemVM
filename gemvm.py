@@ -25,12 +25,14 @@ class VMControl:
     states = ('off', 'booting', 'running', 'shutting_down')
 
     def __init__(self, disk_image, cmd='qemu-system-x86_64', mem=3, port=2222,
-                 flush_log=False):
+                 boot_timeout=300, shutdown_timeout=60, flush_log=False):
 
         self.disk_image = disk_image
         self.cmd = cmd
         self.mem = mem
         self.port = port
+        self.boot_timeout = boot_timeout
+        self.shutdown_timeout = shutdown_timeout
         self.flush_log = flush_log
 
         self.title, _ = os.path.splitext(os.path.basename(self.disk_image))
@@ -167,7 +169,7 @@ class VMControl:
                 # start & stop normally, so the script doesn't hang or produce
                 # unexpected errors, and set the final machine state:
                 self._cancel_tasks('_shut_down', '_wait_until_booted',
-                                   '_shutdown_timeout', '_boot_timeout')
+                                   '_shutdown_timer', '_boot_timer')
             self.state = 'off'
 
     async def _wait_until_booted(self, events):
@@ -180,7 +182,7 @@ class VMControl:
                 await asyncio.sleep(1)  # retry port after 1s
             else:
                 self.state = 'running'
-                self._cancel_tasks('_boot_timeout')  # unblock event loop exit
+                self._cancel_tasks('_boot_timer')  # unblock event loop exit
                 break
 
         # This coroutine should get cancelled before this ever happens. Don't
@@ -268,13 +270,13 @@ class VMControl:
 
         # If anything has gone wrong (eg. QMP), add a warning to the status?
 
-    async def _boot_timeout(self, events):
+    async def _boot_timer(self, events):
 
         # Impose a general boot timeout, to avoid hanging indefinitely if the
         # VM itself hangs (but leave long enough for a "normal" fsck before
         # ceding manual control to the user).
         try:
-            await asyncio.sleep(300)
+            await asyncio.sleep(self.boot_timeout)
         except asyncio.CancelledError:
             return
         if self.state == 'booting':
@@ -333,14 +335,15 @@ class VMControl:
         # expected, otherwise it keeps running so the user will get control
         # back and an exit status report.
 
-    async def _shutdown_timeout(self, events):
+    async def _shutdown_timer(self, events):
 
         # Can't shut down until we're asked to *and* the VM has booted:
         await asyncio.wait_for(self._tasks['_wait_until_booted'], timeout=None)
 
         await events['shutdown_request'].wait()
 
-        await asyncio.sleep(60)  # shut down normally takes a couple of sec.
+        # Shutdown normally takes about 2-6s with a minimal OS install
+        await asyncio.sleep(self.shutdown_timeout)
         self.timed_out = True
         self.log('Shutdown timed out')
         self._cancel_tasks()
@@ -377,9 +380,9 @@ class VMControl:
                   name in (
                       '_run_vm',
                       '_wait_until_booted',
-                      '_boot_timeout',
+                      '_boot_timer',
                       '_shut_down',
-                      '_shutdown_timeout',
+                      '_shutdown_timer',
                   )
             }
             self._tasks['_progress'] = asyncio.create_task(
