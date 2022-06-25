@@ -52,6 +52,7 @@ class VMControl:
         self.pid = None
         self.exit_status = None
         self.mem_err = False
+        self.timed_out = False
 
     @property
     def state(self):
@@ -118,7 +119,7 @@ class VMControl:
         return(f"<{self.__class__.__name__}('{self.disk_image}', "
                f"mem={self.mem}, port={self.port}, pid={self.pid}, "
                f"state='{self.state}', qmp_established={self.qmp_established}, "
-               f"exit_status={self.exit_status})>")
+               f"timed_out={self.timed_out}, exit_status={self.exit_status})>")
 
     def _keyboard_interrupt(self, events):
         events['shutdown_request'].set()
@@ -185,8 +186,8 @@ class VMControl:
         # This coroutine should get cancelled before this ever happens. Don't
         # raise an exception, which would block any coroutines waiting on this.
         if self.state != 'running':
-            sys.stderr.write(f'State changed before successful connection '
-                             f'to localhost:{self.port}\n')
+            self.log(f'State changed before successful connection to '
+                     f'localhost:{self.port}\n')
 
     async def _check_ssh(self):
 
@@ -277,7 +278,8 @@ class VMControl:
         except asyncio.CancelledError:
             return
         if self.state == 'booting':
-            sys.stderr.write('\nTimed out.\n')
+            self.timed_out = True
+            self.log('Boot timed out')
             self._cancel_tasks()  # May leave QEMU running in the background
 
     async def _shut_down(self, events):
@@ -339,7 +341,8 @@ class VMControl:
         await events['shutdown_request'].wait()
 
         await asyncio.sleep(60)  # shut down normally takes a couple of sec.
-        sys.stderr.write('\nShut down timed out.\n')
+        self.timed_out = True
+        self.log('Shutdown timed out')
         self._cancel_tasks()
 
     async def _run(self, stdscr):
