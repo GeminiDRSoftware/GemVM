@@ -2,6 +2,7 @@
 #
 # Copyright(c) 2022 Association of Universities for Research in Astronomy, Inc.
 
+import argparse
 import asyncio
 import contextlib
 import curses
@@ -16,26 +17,33 @@ import sys
 import time
 import traceback
 
+# Default values:
 ssh_port = 2222
-mem_GB = 3
+mem_GB = 3.0
 
 
 class VMControl:
 
     states = ('off', 'booting', 'running', 'shutting_down')
 
-    def __init__(self, disk_image, cmd='qemu-system-x86_64', mem=3, port=2222,
-                 boot_timeout=300, shutdown_timeout=60, flush_log=False):
+    def __init__(self, disk_image, cmd='qemu-system-x86_64', mem=mem_GB,
+                 port=ssh_port, boot_timeout=300, shutdown_timeout=60,
+                 console=False, flush_log=False):
 
+        if isinstance(disk_image, str):
+            disk_image = [disk_image]
         self.disk_image = disk_image
         self.cmd = cmd
         self.mem = mem
         self.port = port
         self.boot_timeout = boot_timeout
         self.shutdown_timeout = shutdown_timeout
+        self.console = console
         self.flush_log = flush_log
 
-        self.title, _ = os.path.splitext(os.path.basename(self.disk_image))
+        self.title, _ = os.path.splitext(
+            os.path.basename(self.disk_image[0] if self.disk_image else '')
+        )
         self.log_file = f'gemvm_{self.title}.log'
         self.qmp_sock = os.path.join(os.sep, 'tmp', f'.gemvm_qmp_{os.getpid()}')
 
@@ -74,21 +82,29 @@ class VMControl:
     @property
     def cmd_args(self):
 
-        return (
+        args = [
+            f'-hd{letter} {disk_image}'
+            # f'-drive file={disk_image},if=virtio,cache=off',
+            for letter, disk_image in zip('abcd', self.disk_image)
+        ]
+        args.extend((
             f'-m {self.mem}G',
-            f'-hda {self.disk_image}',
-            # f'-drive file={self.disk_image},if=virtio,cache=off',
             f'-name "{self.title}"',
             f'-machine q35',
             f'-smp 2',
-            f'-vga none',
-            f'-nographic',
             f'-boot menu=off',
             f'-qmp unix:{self.qmp_sock},server,nowait',
             f'-device e1000,netdev=net0',
             # f'-device virtio-net-pci,netdev=net0',
             f'-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{self.port}-:22',
-        )
+            # f'-accel kvm'
+        ))
+        if self.console is False:
+            args.extend((
+                f'-vga none',
+                f'-nographic',
+            ))
+        return args
 
     def log_context(self):
         if self._log_fd and not self._log_fd.closed:
@@ -425,8 +441,33 @@ class VMControl:
 
 if __name__ == '__main__':
 
-    vm = VMControl('qemuiraf.qcow2', mem=mem_GB, port=ssh_port)
+    parser = argparse.ArgumentParser(
+        description='A simple control script for using QEMU to run a VM image '
+                    'that accepts login via ssh'
+    )
+    parser.add_argument('-m', '--mem', default=mem_GB, type=float,
+                        help='memory in GB to allocate for guest VM (>=0.25)')
+    parser.add_argument('-p', '--port', default=ssh_port, type=int,
+                        help='host port number for guest ssh service to '
+                             'listen on')
+    parser.add_argument('--console', action='store_true',
+                        help='enable console window / VNC server (whatever '
+                             'default the installed QEMU has available on '
+                             'your desktop) for troubleshooting?')
+    parser.add_argument(
+        'disk_image', nargs='+', type=str,
+        help='path or user-defined name of a disk image file (more than one '
+             'may be specified); if the value matches a name defined in the '
+             'configuration file, it gets mapped to the corresponding path, '
+             'otherwise it is treated as a path directly [work in progress]'
+    )
+    args = parser.parse_args()
 
+    vm = VMControl(
+        args.disk_image, mem=args.mem, port=args.port, console=args.console
+    )
+
+    # Run the VM:
     exit_status = vm()
 
     if exit_status == 0:
