@@ -26,13 +26,13 @@ class VMControl:
 
     states = ('off', 'booting', 'running', 'shutting_down')
 
-    def __init__(self, disk_image, cmd='qemu-system-x86_64', mem=mem_GB,
+    def __init__(self, disk_images, cmd='qemu-system-x86_64', mem=mem_GB,
                  port=ssh_port, boot_timeout=300, shutdown_timeout=60,
                  console=False, flush_log=False):
 
-        if isinstance(disk_image, str):
-            disk_image = [disk_image]
-        self.disk_image = disk_image
+        if isinstance(disk_images, str):
+            disk_images = [disk_images]
+        self.disk_images = disk_images
         self.cmd = cmd
         self.mem = mem
         self.port = port
@@ -42,7 +42,7 @@ class VMControl:
         self.flush_log = flush_log
 
         self.title, _ = os.path.splitext(
-            os.path.basename(self.disk_image[0] if self.disk_image else '')
+            os.path.basename(self.disk_images[0] if self.disk_images else '')
         )
         self.log_file = f'gemvm_{self.title}.log'
         self.qmp_sock = os.path.join(os.sep, 'tmp', f'.gemvm_qmp_{os.getpid()}')
@@ -85,7 +85,7 @@ class VMControl:
         args = [
             f'-hd{letter} {disk_image}'
             # f'-drive file={disk_image},if=virtio,cache=off',
-            for letter, disk_image in zip('abcd', self.disk_image)
+            for letter, disk_image in zip('abcd', self.disk_images)
         ]
         args.extend((
             f'-m {self.mem}G',
@@ -134,9 +134,10 @@ class VMControl:
         return self.exit_status
 
     def __repr__(self):
-        return(f"<{self.__class__.__name__}('{self.disk_image}', "
-               f"mem={self.mem}, port={self.port}, pid={self.pid}, "
-               f"state='{self.state}', qmp_established={self.qmp_established}, "
+        return(f"<{self.__class__.__name__}(title='{self.title}', "
+               f"disk_images={self.disk_images}, mem={self.mem}, "
+               f"port={self.port}, pid={self.pid}, state='{self.state}', "
+               f"qmp_established={self.qmp_established}, "
                f"timed_out={self.timed_out}, exit_status={self.exit_status})>")
 
     def _keyboard_interrupt(self, events):
@@ -455,7 +456,7 @@ if __name__ == '__main__':
                              'default the installed QEMU has available on '
                              'your desktop) for troubleshooting?')
     parser.add_argument(
-        'disk_image', nargs='+', type=str,
+        'disk_images', nargs='+', type=str, metavar='disk_image',
         help='path or user-defined name of a disk image file (more than one '
              'may be specified); if the value matches a name defined in the '
              'configuration file, it gets mapped to the corresponding path, '
@@ -464,7 +465,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     vm = VMControl(
-        args.disk_image, mem=args.mem, port=args.port, console=args.console
+        args.disk_images, mem=args.mem, port=args.port, console=args.console
     )
 
     # Run the VM:
