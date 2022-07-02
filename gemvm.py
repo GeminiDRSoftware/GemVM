@@ -34,13 +34,6 @@ class VMControl:
             disk_images = [disk_images]
         self.disk_images = disk_images
         self.cmd = cmd
-        self.mem = mem
-        self.port = port
-        self.boot_timeout = boot_timeout
-        self.shutdown_timeout = shutdown_timeout
-        self.console = console
-        self.flush_log = flush_log
-
         if title is not None:
             self.title = title
         else:
@@ -49,6 +42,13 @@ class VMControl:
                     self.disk_images[0] if self.disk_images else ''
                 )
             )
+        self.mem = mem
+        self.port = port
+        self.boot_timeout = boot_timeout
+        self.shutdown_timeout = shutdown_timeout
+        self.console = console
+        self.flush_log = flush_log
+
         self.log_file = f'gemvm_{self.title}.log'
         self.qmp_sock = os.path.join(os.sep, 'tmp', f'.gemvm_qmp_{os.getpid()}')
 
