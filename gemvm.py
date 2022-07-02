@@ -26,9 +26,9 @@ class VMControl:
 
     states = ('off', 'booting', 'running', 'shutting_down')
 
-    def __init__(self, disk_images, cmd='qemu-system-x86_64', mem=mem_GB,
-                 port=ssh_port, boot_timeout=300, shutdown_timeout=60,
-                 console=False, flush_log=False):
+    def __init__(self, disk_images, cmd='qemu-system-x86_64', title=None,
+                 mem=mem_GB, port=ssh_port, boot_timeout=300,
+                 shutdown_timeout=60, console=False, flush_log=False):
 
         if isinstance(disk_images, str):
             disk_images = [disk_images]
@@ -41,9 +41,14 @@ class VMControl:
         self.console = console
         self.flush_log = flush_log
 
-        self.title, _ = os.path.splitext(
-            os.path.basename(self.disk_images[0] if self.disk_images else '')
-        )
+        if title is not None:
+            self.title = title
+        else:
+            self.title, _ = os.path.splitext(
+                os.path.basename(
+                    self.disk_images[0] if self.disk_images else ''
+                )
+            )
         self.log_file = f'gemvm_{self.title}.log'
         self.qmp_sock = os.path.join(os.sep, 'tmp', f'.gemvm_qmp_{os.getpid()}')
 
@@ -442,13 +447,14 @@ class VMControl:
 
 if __name__ == '__main__':
 
+    # Define main script arguments:
     parser = argparse.ArgumentParser(
         description='A simple control script for using QEMU to run a VM image '
                     'that accepts login via ssh'
     )
-    parser.add_argument('-m', '--mem', default=mem_GB, type=float,
+    parser.add_argument('-m', '--mem', type=float,
                         help='memory in GB to allocate for guest VM (>=0.25)')
-    parser.add_argument('-p', '--port', default=ssh_port, type=int,
+    parser.add_argument('-p', '--port', type=int,
                         help='host port number for guest ssh service to '
                              'listen on')
     parser.add_argument('--console', action='store_true',
@@ -457,20 +463,61 @@ if __name__ == '__main__':
                              'your desktop) for troubleshooting?')
     parser.add_argument(
         'disk_images', nargs='+', type=str, metavar='disk_image',
-        help='path or user-defined name of a disk image file (more than one '
-             'may be specified); if the value matches a name defined in the '
-             'configuration file, it gets mapped to the corresponding path, '
-             'otherwise it is treated as a path directly [work in progress]'
+        help='path or user-defined name of a disk image file; if the value '
+             'has no directory prefixed and matches a name defined in the '
+             'configuration file, it gets mapped to the corresponding '
+             'path(s), otherwise it is treated as a path directly'
     )
     args = parser.parse_args()
 
-    vm = VMControl(
-        args.disk_images, mem=args.mem, port=args.port, console=args.console
+    # Read optional config file:
+    config_file = os.path.expanduser(
+        os.path.join('~', '.geminidr', 'gemvm', 'config.json')
     )
+    config = {'names' : {}}
+    try:
+        with open(config_file) as config_fd:  # user's default encoding
+            config = json.loads(config_fd.read())
+    except json.JSONDecodeError:
+        # Should this be logged (would have to delete the log in main script)?
+        sys.stderr.write(f'Ignoring corrupt config (try re-creating it):\n'
+                         f'  {config_file}\n')
+    except OSError:
+        pass
 
-    # Run the VM:
+    # Combine the user args & config file to construct args for QEMU:
+    disk_images, title, mem, port = [], '', args.mem, args.port
+    for name in args.disk_images:
+        if not os.path.dirname(name) and name in config['names']:
+            entry = config['names'][name]
+            try:
+                assert isinstance(entry['disk_images'], list)
+            except (KeyError, AssertionError):
+                raise ValueError(f"Corrupt entry '{name}' in {config_file}")
+            disk_images.extend(entry['disk_images'])
+            if title is '':
+                title = name
+            if not mem:
+                mem = entry.get('mem')
+            if not port:
+                port = entry.get('port')
+        else:
+            disk_images.append(name)
+            if title is '':
+                title = None
+
+    if not mem:
+        mem = mem_GB
+    if not port:
+        port = ssh_port
+
+    # Instantiate & run the VM:
+    vm = VMControl(disk_images, title=title, mem=mem, port=port,
+                   console=args.console)
+
     exit_status = vm()
 
+    # Report outcome to the user:
     if exit_status == 0:
         msg = '\nVM process completed successfully'
         print(msg + '\n')
