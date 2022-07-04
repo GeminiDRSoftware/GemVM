@@ -11,7 +11,6 @@ import json
 import os
 import shlex
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -235,7 +234,7 @@ class VMControl:
 
         # This usually gives ConnectionRefusedError just on the first try:
         reader, writer = await asyncio.open_connection(
-            host=socket.gethostbyname('localhost'), port=self.port
+            host='127.0.0.1', port=self.port
         )
         # This occasionally gets EOF instead of the expected reply (presumably
         # because of some time-out or the server not being ready yet, as when
