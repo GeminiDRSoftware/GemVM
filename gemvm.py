@@ -513,7 +513,7 @@ if __name__ == '__main__':
             except (KeyError, AssertionError):
                 raise ValueError(f"Corrupt entry '{name}' in {config_file}")
             disk_images.extend(entry['disk_images'])
-            if title is '':
+            if title == '':
                 title = name
             if not mem:
                 mem = entry.get('mem')
@@ -521,7 +521,7 @@ if __name__ == '__main__':
                 port = entry.get('port')
         else:
             disk_images.append(name)
-            if title is '':
+            if title == '':
                 title = None
 
     if not mem:
