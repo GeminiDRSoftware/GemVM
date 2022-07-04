@@ -542,6 +542,11 @@ if __name__ == '__main__':
         vm.log(msg, time_stamp=False)
 
     else:
+        if vm.timed_out:
+            msg = f'\nTimed out while {vm.state.replace("_", " ")}.'
+            sys.stderr.write(msg + '\n')
+            vm.log(msg, time_stamp=False)
+
         end = f'see {vm.log_file}\n'
         if exit_status is None:
             if vm.pid is None:
@@ -569,14 +574,14 @@ if __name__ == '__main__':
         vm.log(msg, time_stamp=False)
 
         if vm.mem_err:
-            msg = (f'It looks like QEMU failed to allocate {mem_GB}GB of '
+            msg = (f'It looks like QEMU failed to allocate {mem}GB of '
                    f'contiguous memory to run the VM.\n\n'
                    f'Try restarting large programs such as your Web browser, '
                    f'to reduce memory\nfragmentation (or closing them '
                    f'entirely if that doesn\'t solve it). If the\nproblem '
-                   f'persists, try reducing "mem_GB" in the configuration '
-                   f'(without going\nbelow 0.25 to 0.5GB, for acceptable '
-                   f'performance with a minimal installation).\n')
+                   f'persists, try reducing the "mem" parameter value '
+                   f'(without going below\n0.25 to 0.5GB for tolerable '
+                   f'performance with a minimal OS installation).\n')
             sys.stderr.write(msg + '\n')
             vm.log(msg, time_stamp=False)
 
