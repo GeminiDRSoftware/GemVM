@@ -168,31 +168,49 @@ class VMControl:
                 )
                 self.pid = proc.pid
 
-                self.log(f'Subprocess Id {self.pid}')
+                # This must not fail, which would confuse the exit state:
+                try:
+                    self.log(f'Subprocess Id {self.pid}')
+                except:
+                    pass
 
                 # Yield control while waiting for process to complete, then
                 # save its exit code when it does:
                 self.exit_status = await proc.wait()
 
-                # In the event of failure, scrape the log for a memory
-                # allocation error (which qemu's exit code doesn't distinguish
-                # from other errors), so we can advise the user on what to do.
-                # This message appears not to change with the locale setting.
-                if self.exit_status == 1:
-                    log_fd.seek(0, 0)
-                    for line in log_fd:
-                        if b'cannot set up guest memory' in line:
-                            self.mem_err = True
-                            break
-                    log_fd.seek(0, 2)  # return to end
+            # Preserve VM state when timing out:
+            except asyncio.CancelledError:
+                self.log('Wait for subprocess cancelled')
+                raise
+
+            # Set state to 'off' in case of exception running subprocess:
+            except:
+                self.state = 'off'
+                raise
+
+            # Set state to 'off' if process completed (with or without errors):
+            else:
+                self.state = 'off'
 
             finally:
                 # Cancel any tasks that may still be running if the VM didn't
                 # start & stop normally, so the script doesn't hang or produce
-                # unexpected errors, and set the final machine state:
+                # unexpected errors:
                 self._cancel_tasks('_shut_down', '_wait_until_booted',
                                    '_shutdown_timer', '_boot_timer')
-            self.state = 'off'
+
+            # If the process ran but produced exit status 1, scrape the log for
+            # a for a memory allocation error (which qemu's exit code doesn't
+            # distinguish from other errors), so we can advise the user on what
+            # to do. This message appears not to change with the user's locale.
+            if self.exit_status == 1:
+                log_fd.seek(0, 0)
+                for line in log_fd:
+                    if b'cannot set up guest memory' in line:
+                        self.mem_err = True
+                        break
+                log_fd.seek(0, 2)  # return to end
+
 
     async def _wait_until_booted(self, events):
 
