@@ -88,20 +88,19 @@ class VMControl:
 
         args = [
             f'-hd{letter} {disk_image}'
-            # f'-drive file={disk_image},if=virtio,cache=off',
+            # f'-drive file={disk_image},if=virtio,cache=off'
             for letter, disk_image in zip('abcd', self.disk_images)
         ]
         args.extend((
             f'-m {self.mem}G',
             f'-name "{self.title}"',
-            f'-machine q35',
+            f'-machine type=q35,accel=hvf:kvm:tcg',
             f'-smp 2',
             f'-boot menu=off',
             f'-qmp unix:{self.qmp_sock},server,nowait',
             f'-device e1000,netdev=net0',
             # f'-device virtio-net-pci,netdev=net0',
             f'-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{self.port}-:22',
-            # f'-accel kvm'
         ))
         if self.console is False:
             args.extend((
