@@ -19,6 +19,7 @@ import traceback
 # Default values:
 ssh_port = 2222
 mem_GB = 3.0
+use_virtio = False
 
 
 class VMControl:
@@ -26,8 +27,9 @@ class VMControl:
     states = ('off', 'booting', 'running', 'shutting_down')
 
     def __init__(self, disk_images, cmd='qemu-system-x86_64', title=None,
-                 mem=mem_GB, port=ssh_port, boot_timeout=300,
-                 shutdown_timeout=60, console=False, flush_log=False):
+                 mem=mem_GB, port=ssh_port, virtio=use_virtio,
+                 boot_timeout=300, shutdown_timeout=60, console=False,
+                 flush_log=False):
 
         if isinstance(disk_images, str):
             disk_images = [disk_images]
@@ -43,6 +45,7 @@ class VMControl:
             )
         self.mem = mem
         self.port = port
+        self.virtio = virtio
         self.boot_timeout = boot_timeout
         self.shutdown_timeout = shutdown_timeout
         self.console = console
@@ -86,10 +89,16 @@ class VMControl:
     @property
     def cmd_args(self):
 
+        if self.virtio:
+            disk_type = 'virtio'
+            net_type = 'virtio-net-pci'
+        else:
+            disk_type = 'ide'
+            net_type = 'e1000'
+
         args = [
-            f'-hd{letter} {disk_image}'
-            # f'-drive file={disk_image},if=virtio,cache=off'
-            for letter, disk_image in zip('abcd', self.disk_images)
+            f'-drive file={disk_image},index={n},if={disk_type},cache=off'
+            for n, disk_image in enumerate(self.disk_images)
         ]
         args.extend((
             f'-m {self.mem}G',
@@ -98,8 +107,7 @@ class VMControl:
             f'-smp 2',
             f'-boot menu=off',
             f'-qmp unix:{self.qmp_sock},server,nowait',
-            f'-device e1000,netdev=net0',
-            # f'-device virtio-net-pci,netdev=net0',
+            f'-device {net_type},netdev=net0',
             f'-netdev user,id=net0,hostfwd=tcp:127.0.0.1:{self.port}-:22',
         ))
         if self.console is False:
@@ -139,8 +147,8 @@ class VMControl:
     def __repr__(self):
         return(f"<{self.__class__.__name__}(title='{self.title}', "
                f"disk_images={self.disk_images}, mem={self.mem}, "
-               f"port={self.port}, pid={self.pid}, state='{self.state}', "
-               f"qmp_established={self.qmp_established}, "
+               f"port={self.port}, virtio={self.virtio}, pid={self.pid}, "
+               f"state='{self.state}', qmp_established={self.qmp_established}, "
                f"timed_out={self.timed_out}, exit_status={self.exit_status})>")
 
     def _keyboard_interrupt(self, events):
@@ -473,6 +481,13 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--port', type=int,
                         help='host port number for guest ssh service to '
                              'listen on')
+    parser.add_argument('--virtio', action='store_true',
+                        help='use paravirtualized disk & network devices')
+    parser.add_argument('--no-virtio', action='store_false', dest='virtio',
+                        help='emulate disk & network hardware instead of '
+                             'requiring paravirtualized drivers in the '
+                             'guest kernel')
+    parser.set_defaults(virtio=None)
     parser.add_argument('--console', action='store_true',
                         help='enable console window / VNC server (whatever '
                              'default the installed QEMU has available on '
@@ -502,7 +517,8 @@ if __name__ == '__main__':
         pass
 
     # Combine the user args & config file to construct args for QEMU:
-    disk_images, title, mem, port = [], '', args.mem, args.port
+    disk_images, mem, port, virtio = [], args.mem, args.port, args.virtio
+    title = ''
     for name in args.disk_images:
         if not os.path.dirname(name) and name in config['names']:
             entry = config['names'][name]
@@ -517,6 +533,8 @@ if __name__ == '__main__':
                 mem = entry.get('mem')
             if not port:
                 port = entry.get('port')
+            if virtio is None:
+                virtio = entry.get('virtio')
         else:
             disk_images.append(name)
             if title == '':
@@ -526,9 +544,11 @@ if __name__ == '__main__':
         mem = mem_GB
     if not port:
         port = ssh_port
+    if virtio is None:
+        virtio = use_virtio
 
     # Instantiate & run the VM:
-    vm = VMControl(disk_images, title=title, mem=mem, port=port,
+    vm = VMControl(disk_images, title=title, mem=mem, port=port, virtio=virtio,
                    console=args.console)
 
     exit_status = vm()
