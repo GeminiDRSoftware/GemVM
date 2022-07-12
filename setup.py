@@ -15,6 +15,7 @@ setup(
         'Development Status :: 4 - Beta',
         'Environment :: Console :: Curses',
         'Intended Audience :: Science/Research',
+        'License :: TBC (pending approval)',
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 3',
