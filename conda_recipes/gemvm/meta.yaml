@@ -1,0 +1,47 @@
+{% set name = "GemVM" %}
+{% set version = "0.9" %}
+{% set tag = 'v' + version %}
+{% set number = '0' %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  git_url: git@github.com:GeminiDRSoftware/GemVM.git
+  git_tag: {{ tag }}
+
+build:
+  noarch: python
+  number: {{ number }}
+  script: {{ PYTHON }} -m pip install . --no-deps --ignore-installed --no-cache-dir -vv
+  entry_points:
+    - gemvm = gemvm.gemvm:main
+
+requirements:
+  host:
+    - python >=3.7
+    - setuptools
+    - pip
+  run:
+    - python >=3.7
+    - qemu >=7.0.0
+
+test:
+  imports:
+    - gemvm
+  commands:
+    - gemvm -h
+
+about:
+  home: http://www.gemini.edu
+  doc_url: https://gemini-iraf-vm-tutorial.readthedocs.io
+  dev_url: https://github.com/GeminiDRSoftware/GemVM
+  license: TBC (pending approval)
+  # license_file: LICENSE
+  summary: Simple control interface for running a local VM with QEMU
+
+extra:
+  recipe-maintainers:
+    - jehturner
+
