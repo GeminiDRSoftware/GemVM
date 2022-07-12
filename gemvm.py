@@ -94,7 +94,7 @@ class VMControl:
             net_type = 'virtio-net-pci'
         else:
             disk_type = 'ide'
-            net_type = 'e1000'
+            net_type = 'e1000e'
 
         args = [
             f'-drive file={disk_image},index={n},if={disk_type},cache=off'
