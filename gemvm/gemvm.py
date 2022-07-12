@@ -469,7 +469,7 @@ class VMControl:
             self._tasks[name].cancel()
 
 
-if __name__ == '__main__':
+def main():
 
     # Define main script arguments:
     parser = argparse.ArgumentParser(
@@ -604,3 +604,7 @@ if __name__ == '__main__':
             vm.log(msg, time_stamp=False)
 
     sys.exit(1 if exit_status is None else exit_status)
+
+
+if __name__ == '__main__':
+    main()
