@@ -503,7 +503,7 @@ def main():
 
     # Read optional config file:
     config_file = os.path.expanduser(
-        os.path.join('~', '.geminidr', 'gemvm', 'config.json')
+        os.path.join('~', '.gemvm', 'config.json')
     )
     config = {'names' : {}}
     try:
