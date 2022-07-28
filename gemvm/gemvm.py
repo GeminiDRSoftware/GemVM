@@ -2,6 +2,11 @@
 #
 # Copyright(c) 2022 Association of Universities for Research in Astronomy, Inc.
 
+"""
+A simple, self-contained script that makes it easier for users to run a VM
+image with QEMU on their local machine.
+"""
+
 import argparse
 import asyncio
 import contextlib
@@ -20,6 +25,11 @@ import traceback
 ssh_port = 2222
 mem_GB = 3.0
 use_virtio = False
+show_console = False
+
+config_file = os.path.expanduser(
+    os.path.join('~', '.gemvm', 'config.json')
+)
 
 
 class VMControl:
@@ -28,7 +38,7 @@ class VMControl:
 
     def __init__(self, disk_images, cmd='qemu-system-x86_64', title=None,
                  mem=mem_GB, port=ssh_port, virtio=use_virtio,
-                 boot_timeout=300, shutdown_timeout=60, console=False,
+                 boot_timeout=300, shutdown_timeout=60, console=show_console,
                  flush_log=False):
 
         if isinstance(disk_images, str):
@@ -469,13 +479,41 @@ class VMControl:
             self._tasks[name].cancel()
 
 
-def main():
+def get_config(filename=None):
 
-    # Define main script arguments:
-    parser = argparse.ArgumentParser(
-        description='A simple control script for using QEMU to run a VM image '
-                    'that accepts login via ssh'
-    )
+    default = {'version' : 1, 'names' : {}}
+
+    err = False
+
+    if not filename:
+        return default, err
+
+    try:
+        with open(filename) as config_fd:  # user's default encoding
+            config = json.loads(config_fd.read())
+    except json.JSONDecodeError:
+        err = True
+    except OSError:
+        config = default
+    else:
+        try:
+            assert isinstance(config['names'], dict)
+        except (TypeError, KeyError, AssertionError):
+            err = True
+
+    # Should this get logged (would have to move log deletion to main script)?
+    if err:
+        config = default
+        sys.stderr.write(f'Ignoring corrupt config (try re-creating it):\n'
+                         f'  {filename}\n')
+
+    return config, err
+
+
+def _add_main_args(parser, lookup=True):
+
+    # Define main VM config arguments for this script & the config script
+
     parser.add_argument('-m', '--mem', type=float,
                         help='memory in GB to allocate for guest VM (>=0.25)')
     parser.add_argument('-p', '--port', type=int,
@@ -487,70 +525,93 @@ def main():
                         help='emulate disk & network hardware instead of '
                              'requiring paravirtualized drivers in the '
                              'guest kernel')
-    parser.set_defaults(virtio=None)
     parser.add_argument('--console', action='store_true',
                         help='enable console window / VNC server (whatever '
                              'default the installed QEMU has available on '
                              'your desktop) for troubleshooting?')
-    parser.add_argument(
-        'disk_images', nargs='+', type=str, metavar='disk_image',
-        help='path or user-defined name of a disk image file; if the value '
-             'has no directory prefixed and matches a name defined in the '
-             'configuration file, it gets mapped to the corresponding '
-             'path(s), otherwise it is treated as a path directly'
-    )
-    args = parser.parse_args()
+    if lookup:
+        help_str = ('path or user-defined name of a VM disk image file; if '
+                    'a value has no directory prefixed and matches a name '
+                    'defined in the configuration file, it gets mapped to the '
+                    'corresponding path(s), otherwise it is treated as a path '
+                    'directly')
+    else:
+        help_str = 'path of a VM disk image file'
 
-    # Read optional config file:
-    config_file = os.path.expanduser(
-        os.path.join('~', '.gemvm', 'config.json')
-    )
-    config = {'names' : {}}
-    try:
-        with open(config_file) as config_fd:  # user's default encoding
-            config = json.loads(config_fd.read())
-    except json.JSONDecodeError:
-        # Should this be logged (would have to delete the log in main script)?
-        sys.stderr.write(f'Ignoring corrupt config (try re-creating it):\n'
-                         f'  {config_file}\n')
-    except OSError:
-        pass
+    parser.add_argument('disk_images', nargs='+', type=str,
+                        metavar='disk_image', help=help_str)
 
-    # Combine the user args & config file to construct args for QEMU:
-    disk_images, mem, port, virtio = [], args.mem, args.port, args.virtio
-    title = ''
+    parser.set_defaults(virtio=None, console=None)
+
+
+def _merge_args(args, config=None):
+
+    # Two modes of usage:
+    # - Generate merged args for VMControl by combining user args with an
+    #   existing config (with >=0 entries) & defaults (config=<path>).
+    # - Generate a new config from user args & defaults (config=None).
+
+    # Main set of args to pass through (besides mandatory "disk_images"):
+    defaults = {'mem': mem_GB, 'port': ssh_port, 'virtio': use_virtio,
+                'console': show_console}
+
+    # Copy applicable user args into a dict containing a new disk_images list,
+    # adding a title parameter with the name if generating VM args:
+    args_dict = vars(args)
+    merged_args = {'disk_images': []}
+    for kw in defaults:
+        merged_args[kw] = args_dict.get(kw)
+    if config:
+        merged_args['title'] = ''
+
+    # Fill in anything not specified on the command line from config file:
     for name in args.disk_images:
-        if not os.path.dirname(name) and name in config['names']:
+        if config and not os.path.dirname(name) and name in config['names']:
             entry = config['names'][name]
             try:
                 assert isinstance(entry['disk_images'], list)
-            except (KeyError, AssertionError):
-                raise ValueError(f"Corrupt entry '{name}' in {config_file}")
-            disk_images.extend(entry['disk_images'])
-            if title == '':
-                title = name
-            if not mem:
-                mem = entry.get('mem')
-            if not port:
-                port = entry.get('port')
-            if virtio is None:
-                virtio = entry.get('virtio')
+            except (TypeError, KeyError, AssertionError):
+                raise ValueError(f"Corrupt entry '{name}' in config file")
+            merged_args['disk_images'].extend(entry['disk_images'])
+            if merged_args['title'] == '':
+                merged_args['title'] = name
+            for kw in defaults:
+                if merged_args[kw] is None:
+                    merged_args[kw] = entry.get(kw)
         else:
-            disk_images.append(name)
-            if title == '':
-                title = None
+            merged_args['disk_images'].append(name)
+            if config and merged_args['title'] == '':
+                merged_args['title'] = None
 
-    if not mem:
-        mem = mem_GB
-    if not port:
-        port = ssh_port
-    if virtio is None:
-        virtio = use_virtio
+    # Fall back to global defaults for parameters not specified anywhere:
+    for kw in defaults:
+        if merged_args[kw] is None:
+            merged_args[kw] = defaults[kw]
+
+    return merged_args
+
+
+def main():
+
+    script_name = os.path.basename(sys.argv[0])
+
+    parser = argparse.ArgumentParser(
+        description='A simple control script for using QEMU to run a VM image '
+                    'that accepts login via ssh'
+    )
+    _add_main_args(parser)
+
+    # Combine user args & optional config file to construct VM args:
+    args = parser.parse_args()
+    config, conf_errs = get_config(config_file)
+    try:
+        vm_args = _merge_args(args, config)
+    except ValueError as e:
+        sys.stderr.write(f'{script_name}: {e}\n')
+        sys.exit(1)
 
     # Instantiate & run the VM:
-    vm = VMControl(disk_images, title=title, mem=mem, port=port, virtio=virtio,
-                   console=args.console)
-
+    vm = VMControl(**vm_args)
     exit_status = vm()
 
     # Report outcome to the user:
