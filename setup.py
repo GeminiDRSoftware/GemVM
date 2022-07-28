@@ -10,7 +10,12 @@ setup(
     url='http://www.gemini.edu',
     maintainer='Science User Support Department',
     packages=['gemvm'],
-    entry_points={'console_scripts' : ['gemvm = gemvm.gemvm:main']},
+    entry_points={
+        'console_scripts' : [
+            'gemvm = gemvm.gemvm:main',
+            'gemvm-config = gemvm.config:main'
+        ]
+    },
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console :: Curses',
