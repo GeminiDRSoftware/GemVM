@@ -18,6 +18,7 @@ import os
 import sys
 
 from .gemvm import config_file, get_config, _add_main_args, _merge_args
+from .gemvm import invocation_err
 
 indent = 4
 
@@ -105,16 +106,14 @@ def main():
             section = {args.name : config['names'][args.name]}
         elif args.cmd in ('del', 'list'):
             # Error if user tries to list or delete a non-existent entry:
-            sys.stderr.write(f"{script_name}: entry '{args.name}' not found\n")
-            sys.exit(1)
+            invocation_err(f"entry '{args.name}' not found")
 
     # Add/update an entry:
     if args.cmd == 'add':
 
         if conf_errs:
-            sys.stderr.write(f"{script_name}: can't update corrupt config; "
-                             f"delete it (or fix manually) first\n")
-            sys.exit(1)
+            invocation_err("can't update corrupt config; delete it (or fix "
+                           "manually) first")
 
         vm_args = _merge_args(args)
 
