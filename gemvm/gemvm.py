@@ -153,9 +153,21 @@ class VMControl:
             if self.flush_log:
                 log_fd.flush()
 
+    def _check_vm_resources(self):
+        # Raise an explicit error if the user gives a bad file path, rather
+        # than having to search the log. We could also check things like ssh
+        # port availability, but in general it's more reliable to apply EAFP
+        # than anticipate every problem (especially memory errors).
+        mode = os.R_OK | os.W_OK  # need +w unless "-drive media=cdrom"
+        for disk_image in self.disk_images:
+            if not (os.path.isfile(disk_image) and
+                    os.access(disk_image, mode)):
+                raise FileNotFoundError(f'cannot open {disk_image}')
+
     # Only one instance can be called from a given Python process without a QMP
     # socket conflict. This call blocks execution anyway but isn't thread safe.
     def __call__(self):
+        self._check_vm_resources()
         curses.wrapper(lambda stdscr : asyncio.run(self._run(stdscr)))
         return self.exit_status
 
@@ -596,9 +608,13 @@ def _merge_args(args, config=None):
     return merged_args
 
 
-def main():
-
+def invocation_err(msg):
     script_name = os.path.basename(sys.argv[0])
+    sys.stderr.write(f'{script_name}: {msg}\n')
+    sys.exit(1)
+
+
+def main():
 
     parser = argparse.ArgumentParser(
         description='A simple control script for using QEMU to run a VM image '
@@ -612,12 +628,14 @@ def main():
     try:
         vm_args = _merge_args(args, config)
     except ValueError as e:
-        sys.stderr.write(f'{script_name}: {e}\n')
-        sys.exit(1)
+        invocation_err(e)
 
     # Instantiate & run the VM:
     vm = VMControl(**vm_args)
-    exit_status = vm()
+    try:
+        exit_status = vm()
+    except (FileNotFoundError, PermissionError) as e:
+        invocation_err(e)
 
     # Report outcome to the user:
     if exit_status == 0:
