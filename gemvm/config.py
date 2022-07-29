@@ -38,6 +38,29 @@ def confirm(prompt):
             return False
 
 
+def list_entries(section):
+
+    padding = indent * ' '
+
+    for name, params in section.items():
+
+        if not isinstance(params, dict):
+            sys.stderr.write(f"WARNING: invalid entry '{name}'\n\n")
+            continue
+
+        print(f'{name}')
+
+        for kw, val in params.items():
+            if isinstance(val, list):
+                print(f'{padding}{kw}')
+                for item in val:
+                    print(f'{2*padding}{item}')
+            else:
+                print(f'{padding}{kw} {val}')
+
+        print()
+
+
 def write_config(config, filename):
 
     with open(filename, mode='w') as config_fd:
@@ -75,9 +98,13 @@ def main():
     # Read any existing config, defaulting to an empty one:
     config, conf_errs = get_config(config_file)
 
-    # Produce error if user tries to list or delete a non-existent entry:
-    if args.name:
-        if args.cmd in ('del', 'list') and args.name not in config['names']:
+    if args.name is None:
+        section = config['names']
+    else:
+        if args.name in config['names']:
+            section = {args.name : config['names'][args.name]}
+        elif args.cmd in ('del', 'list'):
+            # Error if user tries to list or delete a non-existent entry:
             sys.stderr.write(f"{script_name}: entry '{args.name}' not found\n")
             sys.exit(1)
 
@@ -93,6 +120,7 @@ def main():
 
         modified = True
         if args.name in config['names']:
+            list_entries(section)
             if not confirm(f'Replace existing entry {args.name}?'):
                 modified = False
                 print('Aborted')
@@ -104,6 +132,7 @@ def main():
     elif args.cmd == 'del':
 
         if args.name:
+            list_entries(section)
             modified = confirm(f'Delete entry {args.name}?')
         else:
             modified = confirm('Delete ALL config entries?')
@@ -121,26 +150,7 @@ def main():
 
         modified = False
 
-        if args.name is None:
-            section = config['names']
-        else:
-            section = {
-                args.name : config['names'][args.name]
-            }
-
-        # TO DO: tidy up print format
-        for name, vals in section.items():
-            try:
-                assert isinstance(vals, dict)
-            except AssertionError:
-                sys.stderr.write(
-                    f"{script_name}: invalid entry for '{name}'\n\n"
-                )
-            else:
-                print(name)
-                for kw in vals:
-                    print(f'    {kw}={vals[kw]}')
-                print()
+        list_entries(section)
 
     # Save updated config, if applicable:
     if modified:
