@@ -20,12 +20,12 @@ setup(
         'Development Status :: 4 - Beta',
         'Environment :: Console :: Curses',
         'Intended Audience :: Science/Research',
-        'License :: TBC (pending approval)',
+        'License :: OSI Approved :: GNU General Public License v2 (GPLv2)',
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 3',
         'Topic :: System :: Emulators',
         'Topic :: Utilities',
     ],
-    license='see LICENSE file',
+    license_files=('LICENSE', 'COPYING')
 )
