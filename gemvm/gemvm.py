@@ -41,9 +41,14 @@ class VMControl:
                  boot_timeout=300, shutdown_timeout=60, console=show_console,
                  flush_log=False):
 
+        # Guarantee list of canonical paths with duplicates removed:
         if isinstance(disk_images, str):
             disk_images = [disk_images]
-        self.disk_images = disk_images
+        self.disk_images = list(dict.fromkeys(
+            [os.path.realpath(os.path.expanduser(disk_image))
+             for disk_image in disk_images]
+        ))
+
         self.cmd = cmd
         if title is not None:
             self.title = title
