@@ -32,6 +32,21 @@ config_file = os.path.expanduser(
 )
 
 
+def standardize_paths(filenames):
+    """Guarantee a list of canonical paths with duplicates removed"""
+    return list(dict.fromkeys([os.path.realpath(os.path.expanduser(filename))
+                               for filename in filenames]))
+
+def check_file_access(filenames):
+    mode = os.R_OK | os.W_OK  # need +w unless "-drive media=cdrom"
+    for filename in filenames:
+        if not (os.path.isfile(filename) and os.access(filename, mode)):
+            raise FileNotFoundError(f'cannot read/write {filename}')
+
+
+# Only one instance of this can be called from a given Python process without a
+# QMP socket conflict. It blocks execution anyway but wouldn't be thread safe.
+
 class VMControl:
 
     states = ('off', 'booting', 'running', 'shutting_down')
@@ -41,14 +56,9 @@ class VMControl:
                  boot_timeout=300, shutdown_timeout=60, console=show_console,
                  flush_log=False):
 
-        # Guarantee list of canonical paths with duplicates removed:
         if isinstance(disk_images, str):
             disk_images = [disk_images]
-        self.disk_images = list(dict.fromkeys(
-            [os.path.realpath(os.path.expanduser(disk_image))
-             for disk_image in disk_images]
-        ))
-
+        self.disk_images = standardize_paths(disk_images)
         self.cmd = cmd
         if title is not None:
             self.title = title
@@ -153,21 +163,14 @@ class VMControl:
             if self.flush_log:
                 log_fd.flush()
 
-    def _check_vm_resources(self):
+    def __call__(self):
         # Raise an explicit error if the user gives a bad file path, rather
         # than having to search the log. We could also check things like ssh
         # port availability, but in general it's more reliable to apply EAFP
         # than anticipate every problem (especially memory errors).
-        mode = os.R_OK | os.W_OK  # need +w unless "-drive media=cdrom"
-        for disk_image in self.disk_images:
-            if not (os.path.isfile(disk_image) and
-                    os.access(disk_image, mode)):
-                raise FileNotFoundError(f'cannot open {disk_image}')
+        check_file_access(self.disk_images)
 
-    # Only one instance can be called from a given Python process without a QMP
-    # socket conflict. This call blocks execution anyway but isn't thread safe.
-    def __call__(self):
-        self._check_vm_resources()
+        # Run the main event loop, with curses status display:
         curses.wrapper(lambda stdscr : asyncio.run(self._run(stdscr)))
         return self.exit_status
 

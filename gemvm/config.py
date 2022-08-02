@@ -17,8 +17,9 @@ import json
 import os
 import sys
 
-from .gemvm import config_file, get_config, _add_main_args, _merge_args
-from .gemvm import invocation_err
+from .gemvm import config_file, get_config, invocation_err
+from .gemvm import standardize_paths, check_file_access
+from .gemvm import _add_main_args, _merge_args
 
 indent = 4
 
@@ -117,6 +118,16 @@ def main():
 
         vm_args = _merge_args(args)
 
+        # Must convert any relative paths, in order to find the VM image when
+        # working in another directory. Also require existence & rw perms, to
+        # help catch mistakes immediately, but there is no file type check,
+        # since the user *could* provide a raw disk image.
+        vm_args['disk_images'] = standardize_paths(vm_args['disk_images'])
+        try:
+            check_file_access(vm_args['disk_images'])
+        except FileNotFoundError as e:
+            invocation_err(e)
+
         modified = True
         if args.name in config['names']:
             list_entries(section)
@@ -158,4 +169,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
