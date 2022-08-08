@@ -1,8 +1,14 @@
 ## Clang doesn't have this option level, but the default behaviour is close:
 #sed -ie 's|-Wimplicit-fallthrough=2|-Wimplicit-fallthrough|' configure
 
-# This seems to be the target that Anaconda has built deps for:
-MACOSX_DEPLOYMENT_TARGET=11.1
+if [ "$OSX_ARCH" = "arm64" ]; then
+    # This seems to be the target that Anaconda has built deps for on M1:
+    MACOSX_DEPLOYMENT_TARGET=11.1
+elif [ "$OSX_ARCH" = "x86_64" ]; then
+    # It looks like some Cocoa-relted libs require 10.13 features, it matches
+    # our build machine & there's no need to use the VM on MacOS <10.14 anyway:
+    MACOSX_DEPLOYMENT_TARGET=10.13
+fi
 
 # Configure has no option for this, to pick up conda's GNU version:
 LIBTOOL=${BUILD_PREFIX}/bin/libtool
@@ -20,6 +26,7 @@ LIBTOOL=${BUILD_PREFIX}/bin/libtool
 	    --make=${BUILD_PREFIX}/bin/make \
 	    --meson=${BUILD_PREFIX}/bin/meson \
 	    --ninja=${BUILD_PREFIX}/bin/ninja \
+            --disable-auth-pam \
 	    --enable-cocoa \
 	    --disable-curses \
 	    --disable-gnutls \
@@ -31,10 +38,12 @@ LIBTOOL=${BUILD_PREFIX}/bin/libtool
 	    --enable-slirp=system \
 	    --enable-virtfs \
 	    --enable-vnc \
+            --disable-vnc-sasl \
 	    --disable-xen \
 	    --smbd=${PREFIX}/bin/smbd || exit 1  # avoid OS SMB, from homebrew
 
 make || exit $?
 
-make install
+make check
 
+make install

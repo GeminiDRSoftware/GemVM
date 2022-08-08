@@ -7,7 +7,7 @@ source:
   sha256: f6b375c7951f728402798b0baabb2d86478ca53d44cedbefabbe1c46bf46f839
 
 build:
-  number: 0
+  number: 1
 
 requirements:
   build:
@@ -15,20 +15,13 @@ requirements:
     - {{ compiler('cxx') }}
     - libtool
     - make
-    - meson
+    - meson >=0.62
     - ninja
     - pkg-config
+    - sphinx
+    - sphinx_rtd_theme >=0.4
   host:
-    - gettext
-    - glib
-    - jpeg
-    - libffi
-    - libpng
-    - libslirp
-    - lzo
-    - pixman
-    - snappy    
-  run:
+    - bzip2
     - gettext
     - glib
     - jpeg
@@ -38,6 +31,19 @@ requirements:
     - lzo
     - pixman
     - snappy
+    - zlib
+  run:
+    - bzip2
+    - gettext
+    - glib
+    - jpeg
+    - libffi
+    - libpng
+    - libslirp
+    - lzo
+    - pixman
+    - snappy
+    - zlib
 
 test:
   commands:
