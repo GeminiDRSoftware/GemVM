@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='GemVM',
-    version='0.10.1',
+    version='0.10.2',
     description='Simple control interface for running a local VM with QEMU',
     author='Gemini Data Processing Software Group',
     author_email='sus_inquiries@gemini.edu',
