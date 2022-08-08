@@ -679,7 +679,7 @@ def main():
         vm.log(msg, time_stamp=False)
 
         if vm.mem_err:
-            msg = (f'It looks like QEMU failed to allocate {mem}GB of '
+            msg = (f'It looks like QEMU failed to allocate {vm.mem}GB of '
                    f'contiguous memory to run the VM.\n\n'
                    f'Try restarting large programs such as your Web browser, '
                    f'to reduce memory\nfragmentation (or closing them '
