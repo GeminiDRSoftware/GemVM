@@ -24,7 +24,7 @@ import traceback
 # Default values:
 ssh_port = 2222
 mem_GB = 3.0
-use_virtio = False
+use_virtio = True
 show_console = False
 
 config_file = os.path.expanduser(
