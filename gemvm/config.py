@@ -67,7 +67,7 @@ def write_config(config, filename):
 
     os.makedirs(os.path.dirname(filename), mode=0o755, exist_ok=True)
 
-    with open(os.open(filename, os.O_CREAT|os.O_WRONLY|os.O_TRUNC, mode=0o700),
+    with open(os.open(filename, os.O_CREAT|os.O_WRONLY|os.O_TRUNC, mode=0o600),
               mode='w') as config_fd:
         config_fd.write(json.dumps(config, indent=indent))
 
