@@ -1,3 +1,4 @@
+set -x
 ## Clang doesn't have this option level, but the default behaviour is close:
 #sed -ie 's|-Wimplicit-fallthrough=2|-Wimplicit-fallthrough|' configure
 
@@ -5,9 +6,11 @@ if [ "$OSX_ARCH" = "arm64" ]; then
     # This seems to be the target that Anaconda has built deps for on M1:
     MACOSX_DEPLOYMENT_TARGET=11.1
 elif [ "$OSX_ARCH" = "x86_64" ]; then
-    # It looks like some Cocoa-relted libs require 10.13 features, it matches
-    # our build machine & there's no need to use the VM on MacOS <10.14 anyway:
-    MACOSX_DEPLOYMENT_TARGET=10.13
+    # Some Cocoa-related libs require 10.13 features, QEMU 7 uses a definition
+    # from the 10.14 SDK when compiled with clang 14 and there's no need to use
+    # the VM on MacOS <10.14 anyway:
+    # MACOSX_DEPLOYMENT_TARGET=10.13
+    MACOSX_DEPLOYMENT_TARGET=10.14
 fi
 
 # Configure has no option for this, to pick up conda's GNU version:

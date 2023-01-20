@@ -7,7 +7,7 @@ source:
   sha256: f6b375c7951f728402798b0baabb2d86478ca53d44cedbefabbe1c46bf46f839
 
 build:
-  number: 1
+  number: 2
 
 requirements:
   build:
@@ -35,7 +35,7 @@ requirements:
   run:
     - bzip2
     - gettext
-    - glib
+    - libglib
     - jpeg
     - libffi
     - libpng
@@ -43,7 +43,7 @@ requirements:
     - lzo
     - pixman
     - snappy
-    - zlib
+    - libzlib
 
 test:
   commands:

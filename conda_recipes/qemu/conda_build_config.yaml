@@ -1,0 +1,2 @@
+CONDA_BUILD_SYSROOT:
+  - /rtfperm/SDKs/MacOSX10.14.sdk  # [osx and x86_64]

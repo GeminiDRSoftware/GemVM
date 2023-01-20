@@ -9,7 +9,7 @@ source:
   sha256: 355aa2fbbaf6232135d7973fdbbbc85da22ea3f6a57f41164eeaa9e05d8a4f7e
 
 build:
-  number: 0
+  number: 1
 
 requirements:
   build:
@@ -19,8 +19,8 @@ requirements:
     - pkg-config
   host:
     - glib
-  # - libglib in the conda-forge recipe just duplicates a subset of glib
   run:
+    - libglib
 
 test:
   commands:
